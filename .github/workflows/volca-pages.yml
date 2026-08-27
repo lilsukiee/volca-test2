@@ -1,4 +1,4 @@
-name: Build Volca Sampler Multi Import Auto Slots
+name: Build Volca Sampler Multi Import v6 Audio Fix
 
 on:
   workflow_dispatch:
@@ -18,7 +18,6 @@ concurrency:
 jobs:
   build:
     runs-on: ubuntu-22.04
-
     steps:
       - name: Checkout this repository
         uses: actions/checkout@v4
@@ -32,110 +31,102 @@ jobs:
           submodules: recursive
           fetch-depth: 1
 
-      - name: Patch multi-file import and auto slots
+      - name: Apply custom patches
         shell: python
         run: |
           from pathlib import Path
 
+          # ---------- multi import + auto slots ----------
           p = Path("app/src/SampleRecord.js")
           s = p.read_text(encoding="utf-8")
 
           start_marker = "  /** @type {React.ChangeEventHandler<HTMLInputElement>} */\n  const importFile = useCallback("
           end_marker = "  return {"
-
           start = s.find(start_marker)
           if start == -1:
-              raise SystemExit("Could not find importFile start marker in SampleRecord.js")
-
+              raise SystemExit("Could not find importFile start")
           end = s.find(end_marker, start)
           if end == -1:
-              raise SystemExit("Could not find importFile end marker in SampleRecord.js")
+              raise SystemExit("Could not find importFile end")
 
-          replacement = '''  /** @type {React.ChangeEventHandler<HTMLInputElement>} */
-          const importFile = useCallback(
-            async (e) => {
-              const files = Array.from(e.target.files || []);
-              if (!files.length) return;
+          replacement = """  /** @type {React.ChangeEventHandler<HTMLInputElement>} */
+            const importFile = useCallback(
+              async (e) => {
+                const files = Array.from(e.target.files || []);
+                if (!files.length) return;
 
-              e.target.value = "";
+                e.target.value = "";
 
-              const startSlotText = window.prompt(
-                `Start Volca slot for ${files.length} file(s) (0-99):`,
-                "0"
-              );
-
-              if (startSlotText === null) return;
-
-              const startSlot = Number.parseInt(startSlotText, 10);
-              if (!Number.isInteger(startSlot) || startSlot < 0 || startSlot > 99) {
-                window.alert("Start slot must be a number from 0 to 99.");
-                return;
-              }
-
-              if (startSlot + files.length - 1 > 99) {
-                window.alert(
-                  `Too many files for slot ${startSlot}. Choose ${100 - startSlot} file(s) or fewer.`
+                const startSlotText = window.prompt(
+                  `Start Volca slot for ${files.length} file(s) (0-99):`,
+                  "0"
                 );
-                return;
-              }
+                if (startSlotText === null) return;
 
-              setCaptureState("finalizing");
-
-              let nextSlot = startSlot;
-              let silentCount = 0;
-              const failedFiles = [];
-
-              for (const file of files) {
-                try {
-                  const arrayBuffer = await file.arrayBuffer();
-                  const audioFileBuffer = new Uint8Array(arrayBuffer);
-
-                  let audioBuffer;
-                  try {
-                    audioBuffer = await getAudioBufferForAudioFileData(audioFileBuffer);
-                  } catch (err) {
-                    failedFiles.push(`${file.name}: unsupported audio format`);
-                    continue;
-                  }
-
-                  if (audioBuffer.length > 65 * audioBuffer.sampleRate) {
-                    failedFiles.push(`${file.name}: longer than 65 seconds`);
-                    continue;
-                  }
-
-                  const result = await onRecordFinish(audioFileBuffer, file, nextSlot);
-
-                  if (result === "silent") {
-                    silentCount += 1;
-                  } else {
-                    nextSlot += 1;
-                  }
-                } catch (err) {
-                  failedFiles.push(`${file.name}: ${String(err)}`);
+                const startSlot = Number.parseInt(startSlotText, 10);
+                if (!Number.isInteger(startSlot) || startSlot < 0 || startSlot > 99) {
+                  window.alert("Start slot must be a number from 0 to 99.");
+                  return;
                 }
-              }
+                if (startSlot + files.length - 1 > 99) {
+                  window.alert(
+                    `Too many files for slot ${startSlot}. Choose ${100 - startSlot} file(s) or fewer.`
+                  );
+                  return;
+                }
 
-              setCaptureState("ready");
+                setCaptureState("finalizing");
+                let nextSlot = startSlot;
+                let silentCount = 0;
+                const failedFiles = [];
 
-              if (silentCount) setShowSilenceWarning(true);
+                for (const file of files) {
+                  try {
+                    const arrayBuffer = await file.arrayBuffer();
+                    const audioFileBuffer = new Uint8Array(arrayBuffer);
 
-              const importedCount = nextSlot - startSlot;
-              if (importedCount) {
-                window.alert(
-                  `${importedCount} sample(s) imported to slots ${startSlot}-${nextSlot - 1}.`
-                );
-              }
+                    let audioBuffer;
+                    try {
+                      audioBuffer = await getAudioBufferForAudioFileData(audioFileBuffer);
+                    } catch (err) {
+                      failedFiles.push(`${file.name}: unsupported audio format`);
+                      continue;
+                    }
 
-              if (failedFiles.length) {
-                window.alert(
-                  `Some files could not be imported:\n\n${failedFiles.join("\n")}`
-                );
-              }
-            },
-            [onRecordFinish]
-          );
-          '''
+                    if (audioBuffer.length > 65 * audioBuffer.sampleRate) {
+                      failedFiles.push(`${file.name}: longer than 65 seconds`);
+                      continue;
+                    }
 
+                    const result = await onRecordFinish(audioFileBuffer, file, nextSlot);
+                    if (result === "silent") {
+                      silentCount += 1;
+                    } else {
+                      nextSlot += 1;
+                    }
+                  } catch (err) {
+                    failedFiles.push(`${file.name}: ${String(err)}`);
+                  }
+                }
+
+                setCaptureState("ready");
+                if (silentCount) setShowSilenceWarning(true);
+
+                const importedCount = nextSlot - startSlot;
+                if (importedCount) {
+                  window.alert(
+                    `${importedCount} sample(s) imported to slots ${startSlot}-${nextSlot - 1}.`
+                  );
+                }
+                if (failedFiles.length) {
+                  window.alert(
+                    `Some files could not be imported:\\n\\n${failedFiles.join("\\n")}`
+                  );
+                }
+              },
+              [onRecordFinish]
+            );
+          """
           s = s[:start] + replacement + s[end:]
 
           if "Import an audio file" in s:
@@ -148,34 +139,118 @@ jobs:
                   '              type="file"\n              multiple\n              accept=',
                   1,
               )
-
           p.write_text(s, encoding="utf-8")
 
+          # ---------- App slotNumber ----------
           p = Path("app/src/App.js")
           s = p.read_text(encoding="utf-8")
 
           old_handler = "const handleRecordFinish = useCallback(async (audioFileBuffer, userFile) => {"
           new_handler = "const handleRecordFinish = useCallback(async (audioFileBuffer, userFile, slotNumber = 0) => {"
-          if old_handler not in s:
-              raise SystemExit("Could not find handleRecordFinish signature in App.js")
-          s = s.replace(old_handler, new_handler, 1)
+          if old_handler in s:
+              s = s.replace(old_handler, new_handler, 1)
+          elif new_handler not in s:
+              raise SystemExit("Could not find handleRecordFinish")
 
-          needle = '''    const sample = new SampleContainer.Mutable({
-            name,
-            sourceFileId,
-            trim: { frames: trimFrames },'''
-          replacement = '''    const sample = new SampleContainer.Mutable({
-            name,
-            sourceFileId,
-            slotNumber,
-            trim: { frames: trimFrames },'''
-          if needle not in s:
-              raise SystemExit("Could not find SampleContainer creation block in App.js")
-          s = s.replace(needle, replacement, 1)
+          needle = """    const sample = new SampleContainer.Mutable({
+                name,
+                sourceFileId,
+                trim: { frames: trimFrames },"""
+          replacement = """    const sample = new SampleContainer.Mutable({
+                name,
+                sourceFileId,
+                slotNumber,
+                trim: { frames: trimFrames },"""
+          if needle in s:
+              s = s.replace(needle, replacement, 1)
+          elif "      slotNumber,\n      trim:" not in s:
+              raise SystemExit("Could not patch slotNumber")
 
           p.write_text(s, encoding="utf-8")
 
-          print("Multi-file import + sequential slot assignment patch applied.")
+          # ---------- iOS / Safari audio playback fix ----------
+          p = Path("app/src/utils/audioData.js")
+          s = p.read_text(encoding="utf-8")
+
+          old = """      function startPlayback() {
+                  source.start();
+                  const startTime = audioContext.currentTime;
+                  onTimeUpdate(0);
+                  frame = requestAnimationFrame(updateCurrentTime);
+                  function updateCurrentTime() {
+                    onTimeUpdate(audioContext.currentTime - startTime);
+                    frame = requestAnimationFrame(updateCurrentTime);
+                  }
+                }
+                if (userOS === 'ios') {
+                  silentAudioElement.play().then(startPlayback);
+                } else {
+                  startPlayback();
+                }"""
+
+          new = """      async function startPlayback() {
+                  // Safari/iOS can leave Web Audio suspended even after a user gesture.
+                  // Explicitly resume it before starting the SYRO/sample buffer.
+                  if (audioContext.state === 'suspended') {
+                    try {
+                      await audioContext.resume();
+                    } catch (err) {
+                      console.warn('AudioContext resume failed', err);
+                    }
+                  }
+
+                  source.start();
+                  const startTime = audioContext.currentTime;
+                  onTimeUpdate(0);
+                  frame = requestAnimationFrame(updateCurrentTime);
+
+                  function updateCurrentTime() {
+                    onTimeUpdate(audioContext.currentTime - startTime);
+                    frame = requestAnimationFrame(updateCurrentTime);
+                  }
+                }
+
+                if (userOS === 'ios') {
+                  // Keep the existing ringer-channel workaround, but do not allow a
+                  // rejected HTMLAudioElement.play() promise to make transfer silent.
+                  silentAudioElement
+                    .play()
+                    .catch((err) => {
+                      console.warn('iOS silent-audio unlock failed', err);
+                    })
+                    .then(startPlayback);
+                } else {
+                  startPlayback();
+                }"""
+
+          if old not in s:
+              raise SystemExit("Could not find audio playback block")
+          s = s.replace(old, new, 1)
+
+          old_prepare = """  const iOSPrepareForAudio = useCallback(() => {
+              silentAudioElement.play();
+            }, [silentAudioElement]);"""
+          new_prepare = """  const iOSPrepareForAudio = useCallback(() => {
+              const audioContext = getTargetAudioContext();
+
+              // Run both unlock paths from the user's tap.
+              if (audioContext.state === 'suspended') {
+                audioContext.resume().catch((err) => {
+                  console.warn('AudioContext prepare/resume failed', err);
+                });
+              }
+
+              silentAudioElement.play().catch((err) => {
+                console.warn('Silent audio prepare failed', err);
+              });
+            }, [silentAudioElement]);"""
+
+          if old_prepare in s:
+              s = s.replace(old_prepare, new_prepare, 1)
+
+          p.write_text(s, encoding="utf-8")
+
+          print("Applied multi-import, auto-slot, and iOS Web Audio resume fix.")
 
       - name: Set up Node.js
         uses: actions/setup-node@v4
@@ -207,40 +282,15 @@ jobs:
           CI: "false"
         run: npm run build
 
-      - name: Add license notices
+      - name: Add third-party notices
         working-directory: app
         run: |
           cat > build/THIRD_PARTY_NOTICES.txt <<'EOF'
-          Volca Sampler Multi Import - Third Party Notices
-
-          Unofficial modified build of:
-          volca-sampler by Ben Wiley
-          https://github.com/benwiley4000/volca-sampler
-          License: MIT
-
-          Uses KORG volca sample / SYRO SDK:
-          https://github.com/korginc/volcasample
-          License: BSD 3-Clause
-
-          Original copyright and license notices remain with
-          their respective copyright holders.
-
-          This modified site is independent and unofficial.
-          It is not affiliated with or endorsed by KORG Inc.
-
-          Modifications:
-          - Multi-file audio import
-          - Sequential Volca Sample slot assignment
+          Unofficial modified build of volca-sampler by Ben Wiley (MIT License).
+          Uses KORG volca sample / SYRO SDK (BSD 3-Clause License).
+          This site is independent and is not affiliated with or endorsed by KORG Inc.
+          Modifications: multi-file import, sequential slots, iOS Web Audio playback fix.
           EOF
-
-          if [ -f LICENSE ]; then
-            cp LICENSE build/LICENSE-volca-sampler.txt
-          fi
-
-          SDK_LICENSE=$(find . -path '*volcasample*' -iname 'LICENSE*' | head -n 1 || true)
-          if [ -n "$SDK_LICENSE" ]; then
-            cp "$SDK_LICENSE" build/LICENSE-korg-volcasample-sdk.txt
-          fi
 
       - name: Configure GitHub Pages
         uses: actions/configure-pages@v5
@@ -256,7 +306,6 @@ jobs:
       url: ${{ steps.deployment.outputs.page_url }}
     runs-on: ubuntu-22.04
     needs: build
-
     steps:
       - name: Deploy to GitHub Pages
         id: deployment
