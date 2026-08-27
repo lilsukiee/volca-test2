@@ -1,0 +1,96 @@
+# Volca Sampler — iPhone Multi-Import
+
+이 패키지는 기존 `benwiley4000/volca-sampler`의 SYRO/전송 기능을 그대로 사용하면서,
+오디오 Import 버튼만 **여러 파일 동시 선택**이 가능하도록 자동 패치하고
+GitHub Pages에 빌드/배포하는 GitHub Actions 워크플로입니다.
+
+## 가장 쉬운 설치
+
+이미 v4 테스트에 사용한 GitHub repository가 있다면 그대로 써도 됩니다.
+
+### 1. GitHub repository에서 새 파일 생성
+
+GitHub에서:
+
+`Add file` → `Create new file`
+
+파일 이름에 아래를 그대로 입력:
+
+`.github/workflows/volca-pages.yml`
+
+그리고 이 ZIP 안의:
+
+`.github/workflows/volca-pages.yml`
+
+내용을 전부 붙여넣고 Commit 합니다.
+
+### 2. Pages 설정
+
+Repository:
+
+`Settings` → `Pages`
+
+`Build and deployment`의 Source를:
+
+`GitHub Actions`
+
+로 선택합니다.
+
+기존에 `Deploy from a branch`로 되어 있었다면 **GitHub Actions로 바꿔야 합니다.**
+
+### 3. Action 실행
+
+`Actions` 탭 → `Build Volca Sampler Multi Import`
+
+자동 실행되지 않았다면:
+
+`Run workflow` → `Run workflow`
+
+### 4. 완료 후
+
+초록 체크가 뜨면:
+
+`Settings` → `Pages`
+
+에 표시되는 주소를 iPhone Safari에서 엽니다.
+
+기존 `Import an audio file` 대신:
+
+`Import audio files`
+
+가 표시됩니다.
+
+이 버튼을 누르면 파일 앱에서 WAV를 여러 개 선택할 수 있습니다.
+
+선택한 파일은 순서대로 각각 별도의 Volca Sampler 샘플로 Import됩니다.
+
+그 다음 기존 Volca Sampler의:
+
+`Select multiple`
+
+을 사용해 여러 샘플을 선택하고 기존 SYRO Transfer 기능으로 Volca Sample 1에 보냅니다.
+
+## 이 버전에서 바뀌는 것
+
+원본:
+- FileList 중 첫 번째 파일 `files[0]`만 읽음
+- file input에 `multiple` 없음
+
+수정:
+- `<input multiple>`
+- 선택한 FileList 전체를 순서대로 처리
+- 각 파일의 기존 포맷 검증 그대로 사용
+- 65초 제한 그대로 사용
+- 각 파일마다 기존 `onRecordFinish()` 저장 루틴 사용
+- SYRO/샘플 편집/Transfer 코드는 수정하지 않음
+
+## 중요
+
+첫 테스트는 2~3개의 짧은 WAV로 해보세요.
+
+Import 후 샘플 목록에 각각 별도 항목으로 나타나면 1단계 성공입니다.
+그 다음 Select multiple → Volca Transfer를 테스트하면 됩니다.
+
+이 수정은 원본 프로젝트의 현재 `master` 소스 구조에 맞춘 패치입니다.
+향후 upstream 코드가 해당 부분을 변경하면 Action에서
+"patch did not match" 오류가 날 수 있습니다.
