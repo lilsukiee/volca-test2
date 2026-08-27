@@ -1,4 +1,4 @@
-name: Build Volca Sampler Multi Import
+name: Build Volca Sampler Multi Import Auto Slots
 
 on:
   workflow_dispatch:
@@ -32,11 +32,12 @@ jobs:
           submodules: recursive
           fetch-depth: 1
 
-      - name: Patch multi-file audio import
+      - name: Patch multi-file import and auto slots
         shell: python
         run: |
           from pathlib import Path
 
+          # ---------- Patch SampleRecord.js ----------
           p = Path("app/src/SampleRecord.js")
           s = p.read_text(encoding="utf-8")
 
@@ -45,11 +46,11 @@ jobs:
 
           start = s.find(start_marker)
           if start == -1:
-              raise SystemExit("Could not find importFile start marker")
+              raise SystemExit("Could not find importFile start marker in SampleRecord.js")
 
           end = s.find(end_marker, start)
           if end == -1:
-              raise SystemExit("Could not find importFile end marker")
+              raise SystemExit("Could not find importFile end marker in SampleRecord.js")
 
           replacement = """  /** @type {React.ChangeEventHandler<HTMLInputElement>} */
             const importFile = useCallback(
@@ -60,8 +61,38 @@ jobs:
                 }
 
                 e.target.value = "";
+
+                const suggestedStartSlot = 0;
+                const startSlotText = window.prompt(
+                  `Start Volca slot for ${files.length} file(s) (0-99):`,
+                  String(suggestedStartSlot)
+                );
+
+                if (startSlotText === null) {
+                  return;
+                }
+
+                const startSlot = Number.parseInt(startSlotText, 10);
+                if (
+                  !Number.isInteger(startSlot) ||
+                  startSlot < 0 ||
+                  startSlot > 99
+                ) {
+                  window.alert("Start slot must be a number from 0 to 99.");
+                  return;
+                }
+
+                if (startSlot + files.length - 1 > 99) {
+                  window.alert(
+                    `Too many files for slot ${startSlot}. ` +
+                      `Choose ${100 - startSlot} file(s) or fewer.`
+                  );
+                  return;
+                }
+
                 setCaptureState("finalizing");
 
+                let nextSlot = startSlot;
                 let silentCount = 0;
                 const failedFiles = [];
 
@@ -85,9 +116,16 @@ jobs:
                       continue;
                     }
 
-                    const result = await onRecordFinish(audioFileBuffer, file);
+                    const result = await onRecordFinish(
+                      audioFileBuffer,
+                      file,
+                      nextSlot
+                    );
+
                     if (result === "silent") {
                       silentCount += 1;
+                    } else {
+                      nextSlot += 1;
                     }
                   } catch (err) {
                     failedFiles.push(`${file.name}: ${String(err)}`);
@@ -100,8 +138,16 @@ jobs:
                   setShowSilenceWarning(true);
                 }
 
+                const importedCount = nextSlot - startSlot;
+                if (importedCount) {
+                  window.alert(
+                    `${importedCount} sample(s) imported to slots ` +
+                      `${startSlot}-${nextSlot - 1}.`
+                  );
+                }
+
                 if (failedFiles.length) {
-                  alert(
+                  window.alert(
                     `Some files could not be imported:\\n\\n${failedFiles.join("\\n")}`
                   );
                 }
@@ -112,28 +158,65 @@ jobs:
 
           s = s[:start] + replacement + s[end:]
 
-          if "Import an audio file" not in s:
+          if "Import an audio file" in s:
+              s = s.replace("Import an audio file", "Import audio files", 1)
+          elif "Import audio files" not in s:
               raise SystemExit("Could not find import button text")
 
-          s = s.replace("Import an audio file", "Import audio files", 1)
-
           needle = '              type="file"\n              accept='
-          if needle not in s:
-              raise SystemExit("Could not find file input")
-
-          s = s.replace(
-              needle,
-              '              type="file"\n              multiple\n              accept=',
-              1,
-          )
+          if needle in s:
+              s = s.replace(
+                  needle,
+                  '              type="file"\n              multiple\n              accept=',
+                  1,
+              )
+          elif '              type="file"\n              multiple\n' not in s:
+              raise SystemExit("Could not find file input in SampleRecord.js")
 
           p.write_text(s, encoding="utf-8")
 
-          patched = p.read_text(encoding="utf-8")
-          assert "Import audio files" in patched
-          assert "\n              multiple\n" in patched
-          assert "const files = Array.from(e.target.files || []);" in patched
-          print("Multi-file import patch applied successfully.")
+          # ---------- Patch App.js ----------
+          p = Path("app/src/App.js")
+          s = p.read_text(encoding="utf-8")
+
+          old_type = "* @type {(audioFileBuffer: Uint8Array, userFile?: File) => Promise<'saved' | 'silent'>}"
+          new_type = "* @type {(audioFileBuffer: Uint8Array, userFile?: File, slotNumber?: number) => Promise<'saved' | 'silent'>}"
+          if old_type in s:
+              s = s.replace(old_type, new_type, 1)
+
+          old_handler = "const handleRecordFinish = useCallback(async (audioFileBuffer, userFile) => {"
+          new_handler = "const handleRecordFinish = useCallback(async (audioFileBuffer, userFile, slotNumber = 0) => {"
+          if old_handler not in s:
+              raise SystemExit("Could not find handleRecordFinish signature in App.js")
+          s = s.replace(old_handler, new_handler, 1)
+
+          needle = """    const sample = new SampleContainer.Mutable({
+                name,
+                sourceFileId,
+                trim: { frames: trimFrames },"""
+          replacement = """    const sample = new SampleContainer.Mutable({
+                name,
+                sourceFileId,
+                slotNumber,
+                trim: { frames: trimFrames },"""
+          if needle not in s:
+              raise SystemExit("Could not find SampleContainer creation block in App.js")
+          s = s.replace(needle, replacement, 1)
+
+          p.write_text(s, encoding="utf-8")
+
+          # ---------- Sanity checks ----------
+          sample_record = Path("app/src/SampleRecord.js").read_text(encoding="utf-8")
+          app = Path("app/src/App.js").read_text(encoding="utf-8")
+
+          assert "multiple" in sample_record
+          assert "window.prompt(" in sample_record
+          assert "nextSlot" in sample_record
+          assert "onRecordFinish(" in sample_record
+          assert "slotNumber = 0" in app
+          assert "      slotNumber," in app
+
+          print("Multi-file import + sequential slot assignment patch applied successfully.")
 
       - name: Set up Node.js
         uses: actions/setup-node@v4
