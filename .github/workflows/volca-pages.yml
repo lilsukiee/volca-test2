@@ -1,4 +1,4 @@
-name: Build Volca Sampler v7 Select All
+name: Build Volca Sampler v8 Visible Select All
 
 on:
   workflow_dispatch:
@@ -229,12 +229,12 @@ jobs:
                       : 'Done'}
                   </Button>"""
 
-          insert = marker + """
+          select_all = """
                   <Button
                     hidden={!hasMultiSelection}
                     className={classes.sampleMenuButtonFullWidth}
                     type="button"
-                    variant="outline-primary"
+                    variant="secondary"
                     disabled={!userSamplesFiltered.length}
                     onClick={() =>
                       setMultipleSelection(
@@ -243,11 +243,14 @@ jobs:
                     }
                   >
                     Select all ({userSamplesFiltered.length})
-                  </Button>"""
+                  </Button>
+          """
 
           if marker not in s:
               raise SystemExit("Could not find multi-selection control in SampleMenu.js")
-          s = s.replace(marker, insert, 1)
+
+          # Insert as a separate full-width control ABOVE Clear selection.
+          s = s.replace(marker, select_all + marker, 1)
 
           p.write_text(s, encoding="utf-8")
 
