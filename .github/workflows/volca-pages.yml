@@ -1,96 +1,220 @@
-# Volca Sampler — iPhone Multi-Import
+name: Build Volca Sampler Multi Import
 
-이 패키지는 기존 `benwiley4000/volca-sampler`의 SYRO/전송 기능을 그대로 사용하면서,
-오디오 Import 버튼만 **여러 파일 동시 선택**이 가능하도록 자동 패치하고
-GitHub Pages에 빌드/배포하는 GitHub Actions 워크플로입니다.
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
 
-## 가장 쉬운 설치
+permissions:
+  contents: read
+  pages: write
+  id-token: write
 
-이미 v4 테스트에 사용한 GitHub repository가 있다면 그대로 써도 됩니다.
+concurrency:
+  group: pages
+  cancel-in-progress: true
 
-### 1. GitHub repository에서 새 파일 생성
+jobs:
+  build:
+    runs-on: ubuntu-22.04
 
-GitHub에서:
+    steps:
+      - name: Checkout this repository
+        uses: actions/checkout@v4
 
-`Add file` → `Create new file`
+      - name: Checkout upstream Volca Sampler
+        uses: actions/checkout@v4
+        with:
+          repository: benwiley4000/volca-sampler
+          ref: master
+          path: app
+          submodules: recursive
+          fetch-depth: 1
 
-파일 이름에 아래를 그대로 입력:
+      - name: Patch multi-file audio import
+        shell: python
+        run: |
+          from pathlib import Path
 
-`.github/workflows/volca-pages.yml`
+          p = Path("app/src/SampleRecord.js")
+          s = p.read_text(encoding="utf-8")
 
-그리고 이 ZIP 안의:
+          old = """  /** @type {React.ChangeEventHandler<HTMLInputElement>} */
+          const importFile = useCallback(
+            (e) => {
+              if (e.target.files && e.target.files.length) {
+                const file = e.target.files[0];
+                file.arrayBuffer().then(async (arrayBuffer) => {
+                  const audioFileBuffer = new Uint8Array(arrayBuffer);
+                  /**
+                   * @type {AudioBuffer}
+                   */
+                  let audioBuffer;
+                  try {
+                    audioBuffer = await getAudioBufferForAudioFileData(audioFileBuffer);
+                  } catch (err) {
+                    alert('Unsupported audio format detected');
+                    return;
+                  }
+                  if (audioBuffer.length > 65 * audioBuffer.sampleRate) {
+                    alert('Please select an audio file no more than 65 seconds long');
+                    return;
+                  }
+                  setCaptureState('finalizing');
+                  const result = await onRecordFinish(audioFileBuffer, file);
+                  setCaptureState('ready');
+                  if (result === 'silent') {
+                    setShowSilenceWarning(true);
+                  }
+                });
+              }
+            },
+            [onRecordFinish]
+          );"""
 
-`.github/workflows/volca-pages.yml`
+          new = """  /** @type {React.ChangeEventHandler<HTMLInputElement>} */
+          const importFile = useCallback(
+            async (e) => {
+              const files = Array.from(e.target.files || []);
+              if (!files.length) {
+                return;
+              }
 
-내용을 전부 붙여넣고 Commit 합니다.
+              e.target.value = '';
+              setCaptureState('finalizing');
 
-### 2. Pages 설정
+              let importedCount = 0;
+              let silentCount = 0;
+              const failedFiles = [];
 
-Repository:
+              for (const file of files) {
+                try {
+                  const arrayBuffer = await file.arrayBuffer();
+                  const audioFileBuffer = new Uint8Array(arrayBuffer);
 
-`Settings` → `Pages`
+                  let audioBuffer;
+                  try {
+                    audioBuffer = await getAudioBufferForAudioFileData(
+                      audioFileBuffer
+                    );
+                  } catch (err) {
+                    failedFiles.push(`${file.name}: unsupported format`);
+                    continue;
+                  }
 
-`Build and deployment`의 Source를:
+                  if (audioBuffer.length > 65 * audioBuffer.sampleRate) {
+                    failedFiles.push(`${file.name}: longer than 65 seconds`);
+                    continue;
+                  }
 
-`GitHub Actions`
+                  const result = await onRecordFinish(audioFileBuffer, file);
+                  importedCount += 1;
 
-로 선택합니다.
+                  if (result === 'silent') {
+                    silentCount += 1;
+                  }
+                } catch (err) {
+                  failedFiles.push(`${file.name}: ${String(err)}`);
+                }
+              }
 
-기존에 `Deploy from a branch`로 되어 있었다면 **GitHub Actions로 바꿔야 합니다.**
+              setCaptureState('ready');
 
-### 3. Action 실행
+              if (silentCount) {
+                setShowSilenceWarning(true);
+              }
 
-`Actions` 탭 → `Build Volca Sampler Multi Import`
+              if (failedFiles.length) {
+                alert(
+                  `${importedCount} file(s) imported.\\n\\n` +
+                    `${failedFiles.length} file(s) could not be imported:\\n` +
+                    failedFiles.join('\\n')
+                );
+              }
+            },
+            [onRecordFinish]
+          );"""
 
-자동 실행되지 않았다면:
+          if old not in s:
+              raise SystemExit(
+                  "Upstream SampleRecord.js changed; import handler patch did not match."
+              )
 
-`Run workflow` → `Run workflow`
+          s = s.replace(old, new, 1)
 
-### 4. 완료 후
+          old_input = """            Import an audio file
+            <input
+              hidden
+              type="file"
+              accept={ANY_FILE ? undefined : 'audio/*,video/*,.wav,.mp3,.ogg'}
+              onChange={importFile}
+            />"""
 
-초록 체크가 뜨면:
+          new_input = """            Import audio files
+            <input
+              hidden
+              type="file"
+              multiple
+              accept={ANY_FILE ? undefined : 'audio/*,video/*,.wav,.mp3,.ogg'}
+              onChange={importFile}
+            />"""
 
-`Settings` → `Pages`
+          if old_input not in s:
+              raise SystemExit(
+                  "Upstream SampleRecord.js changed; file input patch did not match."
+              )
 
-에 표시되는 주소를 iPhone Safari에서 엽니다.
+          s = s.replace(old_input, new_input, 1)
+          p.write_text(s, encoding="utf-8")
+          print("Multi-file import patch applied.")
 
-기존 `Import an audio file` 대신:
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "16"
+          cache: npm
+          cache-dependency-path: app/package-lock.json
 
-`Import audio files`
+      - name: Set up Emscripten
+        uses: mymindstorm/setup-emsdk@v14
+        with:
+          version: "2.0.34"
+          actions-cache-folder: emsdk-cache
 
-가 표시됩니다.
+      - name: Install dependencies
+        working-directory: app
+        run: npm ci
 
-이 버튼을 누르면 파일 앱에서 WAV를 여러 개 선택할 수 있습니다.
+      - name: Build KORG SYRO browser bindings
+        working-directory: app
+        run: |
+          chmod +x build-bindings.sh build-factory-samples-index
+          ./build-bindings.sh
+          ./build-factory-samples-index
 
-선택한 파일은 순서대로 각각 별도의 Volca Sampler 샘플로 Import됩니다.
+      - name: Build web app
+        working-directory: app
+        env:
+          CI: "false"
+        run: npm run build
 
-그 다음 기존 Volca Sampler의:
+      - name: Configure GitHub Pages
+        uses: actions/configure-pages@v5
 
-`Select multiple`
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: app/build
 
-을 사용해 여러 샘플을 선택하고 기존 SYRO Transfer 기능으로 Volca Sample 1에 보냅니다.
+  deploy:
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-22.04
+    needs: build
 
-## 이 버전에서 바뀌는 것
-
-원본:
-- FileList 중 첫 번째 파일 `files[0]`만 읽음
-- file input에 `multiple` 없음
-
-수정:
-- `<input multiple>`
-- 선택한 FileList 전체를 순서대로 처리
-- 각 파일의 기존 포맷 검증 그대로 사용
-- 65초 제한 그대로 사용
-- 각 파일마다 기존 `onRecordFinish()` 저장 루틴 사용
-- SYRO/샘플 편집/Transfer 코드는 수정하지 않음
-
-## 중요
-
-첫 테스트는 2~3개의 짧은 WAV로 해보세요.
-
-Import 후 샘플 목록에 각각 별도 항목으로 나타나면 1단계 성공입니다.
-그 다음 Select multiple → Volca Transfer를 테스트하면 됩니다.
-
-이 수정은 원본 프로젝트의 현재 `master` 소스 구조에 맞춘 패치입니다.
-향후 upstream 코드가 해당 부분을 변경하면 Action에서
-"patch did not match" 오류가 날 수 있습니다.
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
