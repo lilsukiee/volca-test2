@@ -36,55 +36,27 @@ jobs:
         shell: python
         run: |
           from pathlib import Path
+          import re
 
-          p = Path("app/src/SampleRecord.js")
-          s = p.read_text(encoding="utf-8")
+          p = Path('app/src/SampleRecord.js')
+          s = p.read_text(encoding='utf-8')
 
-          old = """  /** @type {React.ChangeEventHandler<HTMLInputElement>} */
-          const importFile = useCallback(
-            (e) => {
-              if (e.target.files && e.target.files.length) {
-                const file = e.target.files[0];
-                file.arrayBuffer().then(async (arrayBuffer) => {
-                  const audioFileBuffer = new Uint8Array(arrayBuffer);
-                  /**
-                   * @type {AudioBuffer}
-                   */
-                  let audioBuffer;
-                  try {
-                    audioBuffer = await getAudioBufferForAudioFileData(audioFileBuffer);
-                  } catch (err) {
-                    alert('Unsupported audio format detected');
-                    return;
-                  }
-                  if (audioBuffer.length > 65 * audioBuffer.sampleRate) {
-                    alert('Please select an audio file no more than 65 seconds long');
-                    return;
-                  }
-                  setCaptureState('finalizing');
-                  const result = await onRecordFinish(audioFileBuffer, file);
-                  setCaptureState('ready');
-                  if (result === 'silent') {
-                    setShowSilenceWarning(true);
-                  }
-                });
-              }
-            },
-            [onRecordFinish]
-          );"""
+          start_marker = '  /** @type {React.ChangeEventHandler<HTMLInputElement>} */\n  const importFile = useCallback('
+          end_marker = '  return {'
+          start = s.find(start_marker)
+          if start == -1:
+              raise SystemExit('Could not find importFile start marker')
+          end = s.find(end_marker, start)
+          if end == -1:
+              raise SystemExit('Could not find importFile end marker')
 
-          new = """  /** @type {React.ChangeEventHandler<HTMLInputElement>} */
+          replacement = '''  /** @type {React.ChangeEventHandler<HTMLInputElement>} */
           const importFile = useCallback(
             async (e) => {
               const files = Array.from(e.target.files || []);
-              if (!files.length) {
-                return;
-              }
-
+              if (!files.length) return;
               e.target.value = '';
               setCaptureState('finalizing');
-
-              let importedCount = 0;
               let silentCount = 0;
               const failedFiles = [];
 
@@ -92,94 +64,63 @@ jobs:
                 try {
                   const arrayBuffer = await file.arrayBuffer();
                   const audioFileBuffer = new Uint8Array(arrayBuffer);
-
                   let audioBuffer;
                   try {
-                    audioBuffer = await getAudioBufferForAudioFileData(
-                      audioFileBuffer
-                    );
+                    audioBuffer = await getAudioBufferForAudioFileData(audioFileBuffer);
                   } catch (err) {
-                    failedFiles.push(`${file.name}: unsupported format`);
+                    failedFiles.push(`${file.name}: unsupported audio format`);
                     continue;
                   }
-
                   if (audioBuffer.length > 65 * audioBuffer.sampleRate) {
                     failedFiles.push(`${file.name}: longer than 65 seconds`);
                     continue;
                   }
-
                   const result = await onRecordFinish(audioFileBuffer, file);
-                  importedCount += 1;
-
-                  if (result === 'silent') {
-                    silentCount += 1;
-                  }
+                  if (result === 'silent') silentCount += 1;
                 } catch (err) {
                   failedFiles.push(`${file.name}: ${String(err)}`);
                 }
               }
 
               setCaptureState('ready');
-
-              if (silentCount) {
-                setShowSilenceWarning(true);
-              }
-
+              if (silentCount) setShowSilenceWarning(true);
               if (failedFiles.length) {
-                alert(
-                  `${importedCount} file(s) imported.\\n\\n` +
-                    `${failedFiles.length} file(s) could not be imported:\\n` +
-                    failedFiles.join('\\n')
-                );
+                alert(`Some files could not be imported:\\n\\n${failedFiles.join('\\n')}`);
               }
             },
             [onRecordFinish]
-          );"""
+          );
+'''
 
-          if old not in s:
-              raise SystemExit(
-                  "Upstream SampleRecord.js changed; import handler patch did not match."
-              )
+          s = s[:start] + replacement + s[end:]
 
-          s = s.replace(old, new, 1)
+          if 'Import an audio file' not in s:
+              raise SystemExit('Could not find import button text')
+          s = s.replace('Import an audio file', 'Import audio files', 1)
 
-          old_input = """            Import an audio file
-            <input
-              hidden
-              type="file"
-              accept={ANY_FILE ? undefined : 'audio/*,video/*,.wav,.mp3,.ogg'}
-              onChange={importFile}
-            />"""
+          needle = '              type="file"\n              accept='
+          if needle not in s:
+              raise SystemExit('Could not find file input')
+          s = s.replace(
+              needle,
+              '              type="file"\n              multiple\n              accept=',
+              1,
+          )
 
-          new_input = """            Import audio files
-            <input
-              hidden
-              type="file"
-              multiple
-              accept={ANY_FILE ? undefined : 'audio/*,video/*,.wav,.mp3,.ogg'}
-              onChange={importFile}
-            />"""
-
-          if old_input not in s:
-              raise SystemExit(
-                  "Upstream SampleRecord.js changed; file input patch did not match."
-              )
-
-          s = s.replace(old_input, new_input, 1)
-          p.write_text(s, encoding="utf-8")
-          print("Multi-file import patch applied.")
+          p.write_text(s, encoding='utf-8')
+          print('Multi-file import patch applied successfully.')
 
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: "16"
+          node-version: '16'
           cache: npm
           cache-dependency-path: app/package-lock.json
 
       - name: Set up Emscripten
         uses: mymindstorm/setup-emsdk@v14
         with:
-          version: "2.0.34"
+          version: '2.0.34'
           actions-cache-folder: emsdk-cache
 
       - name: Install dependencies
@@ -196,7 +137,7 @@ jobs:
       - name: Build web app
         working-directory: app
         env:
-          CI: "false"
+          CI: 'false'
         run: npm run build
 
       - name: Configure GitHub Pages
