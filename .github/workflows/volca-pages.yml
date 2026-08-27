@@ -1,4 +1,4 @@
-name: Build Volca Sampler Multi Import v6 Audio Fix
+name: Build Volca Sampler v7 Select All
 
 on:
   workflow_dispatch:
@@ -18,6 +18,7 @@ concurrency:
 jobs:
   build:
     runs-on: ubuntu-22.04
+
     steps:
       - name: Checkout this repository
         uses: actions/checkout@v4
@@ -36,10 +37,9 @@ jobs:
         run: |
           from pathlib import Path
 
-          # ---------- multi import + auto slots ----------
+          # ---------- Multi import ----------
           p = Path("app/src/SampleRecord.js")
           s = p.read_text(encoding="utf-8")
-
           start_marker = "  /** @type {React.ChangeEventHandler<HTMLInputElement>} */\n  const importFile = useCallback("
           end_marker = "  return {"
           start = s.find(start_marker)
@@ -84,7 +84,6 @@ jobs:
                   try {
                     const arrayBuffer = await file.arrayBuffer();
                     const audioFileBuffer = new Uint8Array(arrayBuffer);
-
                     let audioBuffer;
                     try {
                       audioBuffer = await getAudioBufferForAudioFileData(audioFileBuffer);
@@ -92,7 +91,6 @@ jobs:
                       failedFiles.push(`${file.name}: unsupported audio format`);
                       continue;
                     }
-
                     if (audioBuffer.length > 65 * audioBuffer.sampleRate) {
                       failedFiles.push(`${file.name}: longer than 65 seconds`);
                       continue;
@@ -141,10 +139,9 @@ jobs:
               )
           p.write_text(s, encoding="utf-8")
 
-          # ---------- App slotNumber ----------
+          # ---------- Auto slot support ----------
           p = Path("app/src/App.js")
           s = p.read_text(encoding="utf-8")
-
           old_handler = "const handleRecordFinish = useCallback(async (audioFileBuffer, userFile) => {"
           new_handler = "const handleRecordFinish = useCallback(async (audioFileBuffer, userFile, slotNumber = 0) => {"
           if old_handler in s:
@@ -165,13 +162,11 @@ jobs:
               s = s.replace(needle, replacement, 1)
           elif "      slotNumber,\n      trim:" not in s:
               raise SystemExit("Could not patch slotNumber")
-
           p.write_text(s, encoding="utf-8")
 
-          # ---------- iOS / Safari audio playback fix ----------
+          # ---------- iOS/Safari audio resume ----------
           p = Path("app/src/utils/audioData.js")
           s = p.read_text(encoding="utf-8")
-
           old = """      function startPlayback() {
                   source.start();
                   const startTime = audioContext.currentTime;
@@ -187,10 +182,7 @@ jobs:
                 } else {
                   startPlayback();
                 }"""
-
           new = """      async function startPlayback() {
-                  // Safari/iOS can leave Web Audio suspended even after a user gesture.
-                  // Explicitly resume it before starting the SYRO/sample buffer.
                   if (audioContext.state === 'suspended') {
                     try {
                       await audioContext.resume();
@@ -198,59 +190,68 @@ jobs:
                       console.warn('AudioContext resume failed', err);
                     }
                   }
-
                   source.start();
                   const startTime = audioContext.currentTime;
                   onTimeUpdate(0);
                   frame = requestAnimationFrame(updateCurrentTime);
-
                   function updateCurrentTime() {
                     onTimeUpdate(audioContext.currentTime - startTime);
                     frame = requestAnimationFrame(updateCurrentTime);
                   }
                 }
-
                 if (userOS === 'ios') {
-                  // Keep the existing ringer-channel workaround, but do not allow a
-                  // rejected HTMLAudioElement.play() promise to make transfer silent.
                   silentAudioElement
                     .play()
-                    .catch((err) => {
-                      console.warn('iOS silent-audio unlock failed', err);
-                    })
+                    .catch((err) => console.warn('iOS silent-audio unlock failed', err))
                     .then(startPlayback);
                 } else {
                   startPlayback();
                 }"""
+          if old in s:
+              s = s.replace(old, new, 1)
+          p.write_text(s, encoding="utf-8")
 
-          if old not in s:
-              raise SystemExit("Could not find audio playback block")
-          s = s.replace(old, new, 1)
+          # ---------- Select All button ----------
+          p = Path("app/src/SampleMenu.js")
+          s = p.read_text(encoding="utf-8")
 
-          old_prepare = """  const iOSPrepareForAudio = useCallback(() => {
-              silentAudioElement.play();
-            }, [silentAudioElement]);"""
-          new_prepare = """  const iOSPrepareForAudio = useCallback(() => {
-              const audioContext = getTargetAudioContext();
+          marker = """        <Button
+                    hidden={!hasMultiSelection}
+                    className={classes.sampleMenuButtonFullWidth}
+                    type="button"
+                    variant="secondary"
+                    onClick={() =>
+                      setMultipleSelection((s) => (s && s.size ? new Set() : null))
+                    }
+                  >
+                    {multipleSelection && multipleSelection.size
+                      ? `Clear selection (${multipleSelection.size})`
+                      : 'Done'}
+                  </Button>"""
 
-              // Run both unlock paths from the user's tap.
-              if (audioContext.state === 'suspended') {
-                audioContext.resume().catch((err) => {
-                  console.warn('AudioContext prepare/resume failed', err);
-                });
-              }
+          insert = marker + """
+                  <Button
+                    hidden={!hasMultiSelection}
+                    className={classes.sampleMenuButtonFullWidth}
+                    type="button"
+                    variant="outline-primary"
+                    disabled={!userSamplesFiltered.length}
+                    onClick={() =>
+                      setMultipleSelection(
+                        new Set(userSamplesFiltered.map((sample) => sample.id))
+                      )
+                    }
+                  >
+                    Select all ({userSamplesFiltered.length})
+                  </Button>"""
 
-              silentAudioElement.play().catch((err) => {
-                console.warn('Silent audio prepare failed', err);
-              });
-            }, [silentAudioElement]);"""
-
-          if old_prepare in s:
-              s = s.replace(old_prepare, new_prepare, 1)
+          if marker not in s:
+              raise SystemExit("Could not find multi-selection control in SampleMenu.js")
+          s = s.replace(marker, insert, 1)
 
           p.write_text(s, encoding="utf-8")
 
-          print("Applied multi-import, auto-slot, and iOS Web Audio resume fix.")
+          print("Applied multi-import, auto-slots, iOS audio fix, and Select All button.")
 
       - name: Set up Node.js
         uses: actions/setup-node@v4
@@ -289,7 +290,8 @@ jobs:
           Unofficial modified build of volca-sampler by Ben Wiley (MIT License).
           Uses KORG volca sample / SYRO SDK (BSD 3-Clause License).
           This site is independent and is not affiliated with or endorsed by KORG Inc.
-          Modifications: multi-file import, sequential slots, iOS Web Audio playback fix.
+          Modifications: multi-file import, sequential slots, iOS audio playback fix,
+          and Select All for multi-selection.
           EOF
 
       - name: Configure GitHub Pages
@@ -306,6 +308,7 @@ jobs:
       url: ${{ steps.deployment.outputs.page_url }}
     runs-on: ubuntu-22.04
     needs: build
+
     steps:
       - name: Deploy to GitHub Pages
         id: deployment
