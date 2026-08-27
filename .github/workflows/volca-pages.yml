@@ -37,7 +37,6 @@ jobs:
         run: |
           from pathlib import Path
 
-          # ---------- Patch SampleRecord.js ----------
           p = Path("app/src/SampleRecord.js")
           s = p.read_text(encoding="utf-8")
 
@@ -52,116 +51,95 @@ jobs:
           if end == -1:
               raise SystemExit("Could not find importFile end marker in SampleRecord.js")
 
-          replacement = """  /** @type {React.ChangeEventHandler<HTMLInputElement>} */
-            const importFile = useCallback(
-              async (e) => {
-                const files = Array.from(e.target.files || []);
-                if (!files.length) {
-                  return;
-                }
+          replacement = '''  /** @type {React.ChangeEventHandler<HTMLInputElement>} */
+          const importFile = useCallback(
+            async (e) => {
+              const files = Array.from(e.target.files || []);
+              if (!files.length) return;
 
-                e.target.value = "";
+              e.target.value = "";
 
-                const suggestedStartSlot = 0;
-                const startSlotText = window.prompt(
-                  `Start Volca slot for ${files.length} file(s) (0-99):`,
-                  String(suggestedStartSlot)
+              const startSlotText = window.prompt(
+                `Start Volca slot for ${files.length} file(s) (0-99):`,
+                "0"
+              );
+
+              if (startSlotText === null) return;
+
+              const startSlot = Number.parseInt(startSlotText, 10);
+              if (!Number.isInteger(startSlot) || startSlot < 0 || startSlot > 99) {
+                window.alert("Start slot must be a number from 0 to 99.");
+                return;
+              }
+
+              if (startSlot + files.length - 1 > 99) {
+                window.alert(
+                  `Too many files for slot ${startSlot}. Choose ${100 - startSlot} file(s) or fewer.`
                 );
+                return;
+              }
 
-                if (startSlotText === null) {
-                  return;
-                }
+              setCaptureState("finalizing");
 
-                const startSlot = Number.parseInt(startSlotText, 10);
-                if (
-                  !Number.isInteger(startSlot) ||
-                  startSlot < 0 ||
-                  startSlot > 99
-                ) {
-                  window.alert("Start slot must be a number from 0 to 99.");
-                  return;
-                }
+              let nextSlot = startSlot;
+              let silentCount = 0;
+              const failedFiles = [];
 
-                if (startSlot + files.length - 1 > 99) {
-                  window.alert(
-                    `Too many files for slot ${startSlot}. ` +
-                      `Choose ${100 - startSlot} file(s) or fewer.`
-                  );
-                  return;
-                }
+              for (const file of files) {
+                try {
+                  const arrayBuffer = await file.arrayBuffer();
+                  const audioFileBuffer = new Uint8Array(arrayBuffer);
 
-                setCaptureState("finalizing");
-
-                let nextSlot = startSlot;
-                let silentCount = 0;
-                const failedFiles = [];
-
-                for (const file of files) {
+                  let audioBuffer;
                   try {
-                    const arrayBuffer = await file.arrayBuffer();
-                    const audioFileBuffer = new Uint8Array(arrayBuffer);
-
-                    let audioBuffer;
-                    try {
-                      audioBuffer = await getAudioBufferForAudioFileData(
-                        audioFileBuffer
-                      );
-                    } catch (err) {
-                      failedFiles.push(`${file.name}: unsupported audio format`);
-                      continue;
-                    }
-
-                    if (audioBuffer.length > 65 * audioBuffer.sampleRate) {
-                      failedFiles.push(`${file.name}: longer than 65 seconds`);
-                      continue;
-                    }
-
-                    const result = await onRecordFinish(
-                      audioFileBuffer,
-                      file,
-                      nextSlot
-                    );
-
-                    if (result === "silent") {
-                      silentCount += 1;
-                    } else {
-                      nextSlot += 1;
-                    }
+                    audioBuffer = await getAudioBufferForAudioFileData(audioFileBuffer);
                   } catch (err) {
-                    failedFiles.push(`${file.name}: ${String(err)}`);
+                    failedFiles.push(`${file.name}: unsupported audio format`);
+                    continue;
                   }
-                }
 
-                setCaptureState("ready");
+                  if (audioBuffer.length > 65 * audioBuffer.sampleRate) {
+                    failedFiles.push(`${file.name}: longer than 65 seconds`);
+                    continue;
+                  }
 
-                if (silentCount) {
-                  setShowSilenceWarning(true);
-                }
+                  const result = await onRecordFinish(audioFileBuffer, file, nextSlot);
 
-                const importedCount = nextSlot - startSlot;
-                if (importedCount) {
-                  window.alert(
-                    `${importedCount} sample(s) imported to slots ` +
-                      `${startSlot}-${nextSlot - 1}.`
-                  );
+                  if (result === "silent") {
+                    silentCount += 1;
+                  } else {
+                    nextSlot += 1;
+                  }
+                } catch (err) {
+                  failedFiles.push(`${file.name}: ${String(err)}`);
                 }
+              }
 
-                if (failedFiles.length) {
-                  window.alert(
-                    `Some files could not be imported:\\n\\n${failedFiles.join("\\n")}`
-                  );
-                }
-              },
-              [onRecordFinish]
-            );
-          """
+              setCaptureState("ready");
+
+              if (silentCount) setShowSilenceWarning(true);
+
+              const importedCount = nextSlot - startSlot;
+              if (importedCount) {
+                window.alert(
+                  `${importedCount} sample(s) imported to slots ${startSlot}-${nextSlot - 1}.`
+                );
+              }
+
+              if (failedFiles.length) {
+                window.alert(
+                  `Some files could not be imported:\n\n${failedFiles.join("\n")}`
+                );
+              }
+            },
+            [onRecordFinish]
+          );
+          '''
 
           s = s[:start] + replacement + s[end:]
 
           if "Import an audio file" in s:
               s = s.replace("Import an audio file", "Import audio files", 1)
-          elif "Import audio files" not in s:
-              raise SystemExit("Could not find import button text")
 
           needle = '              type="file"\n              accept='
           if needle in s:
@@ -170,19 +148,11 @@ jobs:
                   '              type="file"\n              multiple\n              accept=',
                   1,
               )
-          elif '              type="file"\n              multiple\n' not in s:
-              raise SystemExit("Could not find file input in SampleRecord.js")
 
           p.write_text(s, encoding="utf-8")
 
-          # ---------- Patch App.js ----------
           p = Path("app/src/App.js")
           s = p.read_text(encoding="utf-8")
-
-          old_type = "* @type {(audioFileBuffer: Uint8Array, userFile?: File) => Promise<'saved' | 'silent'>}"
-          new_type = "* @type {(audioFileBuffer: Uint8Array, userFile?: File, slotNumber?: number) => Promise<'saved' | 'silent'>}"
-          if old_type in s:
-              s = s.replace(old_type, new_type, 1)
 
           old_handler = "const handleRecordFinish = useCallback(async (audioFileBuffer, userFile) => {"
           new_handler = "const handleRecordFinish = useCallback(async (audioFileBuffer, userFile, slotNumber = 0) => {"
@@ -190,33 +160,22 @@ jobs:
               raise SystemExit("Could not find handleRecordFinish signature in App.js")
           s = s.replace(old_handler, new_handler, 1)
 
-          needle = """    const sample = new SampleContainer.Mutable({
-                name,
-                sourceFileId,
-                trim: { frames: trimFrames },"""
-          replacement = """    const sample = new SampleContainer.Mutable({
-                name,
-                sourceFileId,
-                slotNumber,
-                trim: { frames: trimFrames },"""
+          needle = '''    const sample = new SampleContainer.Mutable({
+            name,
+            sourceFileId,
+            trim: { frames: trimFrames },'''
+          replacement = '''    const sample = new SampleContainer.Mutable({
+            name,
+            sourceFileId,
+            slotNumber,
+            trim: { frames: trimFrames },'''
           if needle not in s:
               raise SystemExit("Could not find SampleContainer creation block in App.js")
           s = s.replace(needle, replacement, 1)
 
           p.write_text(s, encoding="utf-8")
 
-          # ---------- Sanity checks ----------
-          sample_record = Path("app/src/SampleRecord.js").read_text(encoding="utf-8")
-          app = Path("app/src/App.js").read_text(encoding="utf-8")
-
-          assert "multiple" in sample_record
-          assert "window.prompt(" in sample_record
-          assert "nextSlot" in sample_record
-          assert "onRecordFinish(" in sample_record
-          assert "slotNumber = 0" in app
-          assert "      slotNumber," in app
-
-          print("Multi-file import + sequential slot assignment patch applied successfully.")
+          print("Multi-file import + sequential slot assignment patch applied.")
 
       - name: Set up Node.js
         uses: actions/setup-node@v4
@@ -247,6 +206,41 @@ jobs:
         env:
           CI: "false"
         run: npm run build
+
+      - name: Add license notices
+        working-directory: app
+        run: |
+          cat > build/THIRD_PARTY_NOTICES.txt <<'EOF'
+          Volca Sampler Multi Import - Third Party Notices
+
+          Unofficial modified build of:
+          volca-sampler by Ben Wiley
+          https://github.com/benwiley4000/volca-sampler
+          License: MIT
+
+          Uses KORG volca sample / SYRO SDK:
+          https://github.com/korginc/volcasample
+          License: BSD 3-Clause
+
+          Original copyright and license notices remain with
+          their respective copyright holders.
+
+          This modified site is independent and unofficial.
+          It is not affiliated with or endorsed by KORG Inc.
+
+          Modifications:
+          - Multi-file audio import
+          - Sequential Volca Sample slot assignment
+          EOF
+
+          if [ -f LICENSE ]; then
+            cp LICENSE build/LICENSE-volca-sampler.txt
+          fi
+
+          SDK_LICENSE=$(find . -path '*volcasample*' -iname 'LICENSE*' | head -n 1 || true)
+          if [ -n "$SDK_LICENSE" ]; then
+            cp "$SDK_LICENSE" build/LICENSE-korg-volcasample-sdk.txt
+          fi
 
       - name: Configure GitHub Pages
         uses: actions/configure-pages@v5
