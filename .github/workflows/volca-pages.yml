@@ -36,91 +36,116 @@ jobs:
         shell: python
         run: |
           from pathlib import Path
-          import re
 
-          p = Path('app/src/SampleRecord.js')
-          s = p.read_text(encoding='utf-8')
+          p = Path("app/src/SampleRecord.js")
+          s = p.read_text(encoding="utf-8")
 
-          start_marker = '  /** @type {React.ChangeEventHandler<HTMLInputElement>} */\n  const importFile = useCallback('
-          end_marker = '  return {'
+          start_marker = "  /** @type {React.ChangeEventHandler<HTMLInputElement>} */\n  const importFile = useCallback("
+          end_marker = "  return {"
+
           start = s.find(start_marker)
           if start == -1:
-              raise SystemExit('Could not find importFile start marker')
+              raise SystemExit("Could not find importFile start marker")
+
           end = s.find(end_marker, start)
           if end == -1:
-              raise SystemExit('Could not find importFile end marker')
+              raise SystemExit("Could not find importFile end marker")
 
-          replacement = '''  /** @type {React.ChangeEventHandler<HTMLInputElement>} */
-          const importFile = useCallback(
-            async (e) => {
-              const files = Array.from(e.target.files || []);
-              if (!files.length) return;
-              e.target.value = '';
-              setCaptureState('finalizing');
-              let silentCount = 0;
-              const failedFiles = [];
-
-              for (const file of files) {
-                try {
-                  const arrayBuffer = await file.arrayBuffer();
-                  const audioFileBuffer = new Uint8Array(arrayBuffer);
-                  let audioBuffer;
-                  try {
-                    audioBuffer = await getAudioBufferForAudioFileData(audioFileBuffer);
-                  } catch (err) {
-                    failedFiles.push(`${file.name}: unsupported audio format`);
-                    continue;
-                  }
-                  if (audioBuffer.length > 65 * audioBuffer.sampleRate) {
-                    failedFiles.push(`${file.name}: longer than 65 seconds`);
-                    continue;
-                  }
-                  const result = await onRecordFinish(audioFileBuffer, file);
-                  if (result === 'silent') silentCount += 1;
-                } catch (err) {
-                  failedFiles.push(`${file.name}: ${String(err)}`);
+          replacement = """  /** @type {React.ChangeEventHandler<HTMLInputElement>} */
+            const importFile = useCallback(
+              async (e) => {
+                const files = Array.from(e.target.files || []);
+                if (!files.length) {
+                  return;
                 }
-              }
 
-              setCaptureState('ready');
-              if (silentCount) setShowSilenceWarning(true);
-              if (failedFiles.length) {
-                alert(`Some files could not be imported:\\n\\n${failedFiles.join('\\n')}`);
-              }
-            },
-            [onRecordFinish]
-          );
-'''
+                e.target.value = "";
+                setCaptureState("finalizing");
+
+                let silentCount = 0;
+                const failedFiles = [];
+
+                for (const file of files) {
+                  try {
+                    const arrayBuffer = await file.arrayBuffer();
+                    const audioFileBuffer = new Uint8Array(arrayBuffer);
+
+                    let audioBuffer;
+                    try {
+                      audioBuffer = await getAudioBufferForAudioFileData(
+                        audioFileBuffer
+                      );
+                    } catch (err) {
+                      failedFiles.push(`${file.name}: unsupported audio format`);
+                      continue;
+                    }
+
+                    if (audioBuffer.length > 65 * audioBuffer.sampleRate) {
+                      failedFiles.push(`${file.name}: longer than 65 seconds`);
+                      continue;
+                    }
+
+                    const result = await onRecordFinish(audioFileBuffer, file);
+                    if (result === "silent") {
+                      silentCount += 1;
+                    }
+                  } catch (err) {
+                    failedFiles.push(`${file.name}: ${String(err)}`);
+                  }
+                }
+
+                setCaptureState("ready");
+
+                if (silentCount) {
+                  setShowSilenceWarning(true);
+                }
+
+                if (failedFiles.length) {
+                  alert(
+                    `Some files could not be imported:\\n\\n${failedFiles.join("\\n")}`
+                  );
+                }
+              },
+              [onRecordFinish]
+            );
+          """
 
           s = s[:start] + replacement + s[end:]
 
-          if 'Import an audio file' not in s:
-              raise SystemExit('Could not find import button text')
-          s = s.replace('Import an audio file', 'Import audio files', 1)
+          if "Import an audio file" not in s:
+              raise SystemExit("Could not find import button text")
+
+          s = s.replace("Import an audio file", "Import audio files", 1)
 
           needle = '              type="file"\n              accept='
           if needle not in s:
-              raise SystemExit('Could not find file input')
+              raise SystemExit("Could not find file input")
+
           s = s.replace(
               needle,
               '              type="file"\n              multiple\n              accept=',
               1,
           )
 
-          p.write_text(s, encoding='utf-8')
-          print('Multi-file import patch applied successfully.')
+          p.write_text(s, encoding="utf-8")
+
+          patched = p.read_text(encoding="utf-8")
+          assert "Import audio files" in patched
+          assert "\n              multiple\n" in patched
+          assert "const files = Array.from(e.target.files || []);" in patched
+          print("Multi-file import patch applied successfully.")
 
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '16'
+          node-version: "16"
           cache: npm
           cache-dependency-path: app/package-lock.json
 
       - name: Set up Emscripten
         uses: mymindstorm/setup-emsdk@v14
         with:
-          version: '2.0.34'
+          version: "2.0.34"
           actions-cache-folder: emsdk-cache
 
       - name: Install dependencies
@@ -137,7 +162,7 @@ jobs:
       - name: Build web app
         working-directory: app
         env:
-          CI: 'false'
+          CI: "false"
         run: npm run build
 
       - name: Configure GitHub Pages
