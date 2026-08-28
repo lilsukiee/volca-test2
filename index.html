@@ -3,57 +3,326 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<title>Volca iPhone Multi-WAV Web Test</title>
+<title>Volca Sample Project Manager</title>
 <style>
-body{font-family:-apple-system,BlinkMacSystemFont,sans-serif;background:#f5f5f7;margin:0;color:#111}
-.wrap{max-width:720px;margin:auto;padding:20px 14px 50px}
-.card{background:#fff;border-radius:18px;padding:18px;box-shadow:0 2px 12px #0001}
-h1{font-size:23px;margin:0 0 8px}.note{font-size:14px;color:#666;line-height:1.55}
-input[type=file]{font-size:16px;width:100%;margin:18px 0}
-.status{background:#f1f1f4;border-radius:12px;padding:13px;margin:12px 0;white-space:pre-wrap}
-.good{color:#08752c;font-weight:700}.bad{color:#b00020;font-weight:700}
-.row{display:grid;grid-template-columns:48px 1fr auto;gap:8px;padding:9px 10px;background:#fafafa;border-radius:10px;margin:7px 0}
-.name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.size{font-size:12px;color:#777}
+:root{
+  --bg:#f5f5f7; --card:#fff; --text:#111; --muted:#666; --line:#e7e7ea;
+  --accent:#111; --ok:#08752c; --bad:#b00020;
+}
+*{box-sizing:border-box}
+body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;background:var(--bg);margin:0;color:var(--text)}
+.wrap{max-width:820px;margin:auto;padding:20px 14px 50px}
+.card{background:var(--card);border-radius:18px;padding:18px;box-shadow:0 2px 12px #0001;margin-bottom:14px}
+h1{font-size:24px;margin:0 0 8px}
+h2{font-size:17px;margin:0 0 12px}
+.note{font-size:14px;color:var(--muted);line-height:1.55}
+.toolbar{display:flex;flex-wrap:wrap;gap:8px;margin:12px 0}
+button,.fileLabel{
+  appearance:none;border:0;border-radius:11px;padding:11px 14px;font-size:14px;font-weight:700;
+  background:#111;color:#fff;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;
+}
+button.secondary,.fileLabel.secondary{background:#ececf0;color:#111}
+button.danger{background:#fff0f1;color:#9f0019}
+button:disabled{opacity:.45;cursor:default}
+input[type=file]{display:none}
+.status{background:#f1f1f4;border-radius:12px;padding:13px;margin:12px 0;white-space:pre-wrap;font-size:14px}
+.good{color:var(--ok);font-weight:700}.bad{color:var(--bad);font-weight:700}
+.projectName{
+  width:100%;font-size:16px;padding:11px 12px;border:1px solid var(--line);border-radius:10px;margin:8px 0 0;
+}
+.headerRow,.row{
+  display:grid;grid-template-columns:38px 50px minmax(0,1fr) auto;gap:8px;align-items:center;
+}
+.headerRow{font-size:12px;color:#777;padding:0 10px 6px}
+.row{padding:9px 10px;background:#fafafa;border-radius:10px;margin:7px 0;border:1px solid transparent}
+.row.selected{border-color:#bbb;background:#f4f4f6}
+.name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.size{font-size:12px;color:#777;white-space:nowrap}
+.slot{font-variant-numeric:tabular-nums;font-weight:800}
+.empty{padding:20px 8px;text-align:center;color:#888;font-size:14px}
+.small{font-size:12px;color:#777}
+.footerNote{font-size:12px;color:#777;line-height:1.5;margin-top:12px}
 </style>
 </head>
 <body>
-<div class="wrap"><div class="card">
-<h1>Volca iPhone Multi‑WAV Web Test</h1>
-<p class="note">HTTPS 웹페이지에서 iPhone Safari의 다중 WAV 선택과 JavaScript 처리를 확인합니다.</p>
+<div class="wrap">
 
-<input id="files" type="file" accept=".wav,audio/wav,audio/x-wav" multiple>
+  <div class="card">
+    <h1>Volca Sample Project Manager</h1>
+    <p class="note">
+      WAV 샘플을 슬롯 00–99에 배치하고, 현재 구성을 하나의 프로젝트 파일로 저장하거나 다시 불러올 수 있습니다.
+    </p>
 
-<div id="status" class="status">대기 중입니다.</div>
-<div id="list"></div>
-</div></div>
+    <input id="projectName" class="projectName" value="My Volca Project" aria-label="프로젝트 이름">
+
+    <div class="toolbar">
+      <label class="fileLabel" for="files">WAV 추가</label>
+      <input id="files" type="file" accept=".wav,audio/wav,audio/x-wav" multiple>
+
+      <button id="saveProject">Save Project</button>
+
+      <label class="fileLabel secondary" for="loadProject">Load Project</label>
+      <input id="loadProject" type="file" accept=".volcaproject,application/json">
+
+      <button id="clearAll" class="danger">Clear</button>
+    </div>
+
+    <div id="status" class="status">대기 중입니다.</div>
+  </div>
+
+  <div class="card">
+    <h2>Samples</h2>
+    <div class="toolbar">
+      <button id="selectAll" class="secondary">Select All</button>
+      <button id="selectNone" class="secondary">Select None</button>
+      <button id="removeSelected" class="secondary">Remove Selected</button>
+      <button id="transferSelected">Transfer Selected</button>
+    </div>
+
+    <div class="headerRow">
+      <div></div><div>Slot</div><div>Sample</div><div>Size</div>
+    </div>
+    <div id="list"></div>
+
+    <div class="footerNote">
+      ※ 현재 버전의 프로젝트 파일은 브라우저에서 선택한 WAV 원본과 슬롯 배치를 저장합니다.<br>
+      ※ “Transfer Selected”는 기존 Volca 전송 로직을 연결할 자리입니다. 지금 이 테스트 파일에는 SYRO 전송 코드가 들어있지 않습니다.
+    </div>
+  </div>
+
+</div>
 
 <script>
-const input=document.getElementById('files');
-const status=document.getElementById('status');
-const list=document.getElementById('list');
+const input = document.getElementById('files');
+const projectNameInput = document.getElementById('projectName');
+const loadProjectInput = document.getElementById('loadProject');
+const status = document.getElementById('status');
+const list = document.getElementById('list');
+
+const saveBtn = document.getElementById('saveProject');
+const clearBtn = document.getElementById('clearAll');
+const selectAllBtn = document.getElementById('selectAll');
+const selectNoneBtn = document.getElementById('selectNone');
+const removeSelectedBtn = document.getElementById('removeSelected');
+const transferBtn = document.getElementById('transferSelected');
+
+let samples = []; // {slot, name, type, size, dataUrl, selected}
 
 function fmt(n){
- return n<1024?n+' B':n<1048576?(n/1024).toFixed(1)+' KB':(n/1048576).toFixed(2)+' MB';
+  return n < 1024 ? n + ' B'
+    : n < 1048576 ? (n/1024).toFixed(1) + ' KB'
+    : (n/1048576).toFixed(2) + ' MB';
 }
+
+function setStatus(message, ok=true){
+  status.innerHTML = `<span class="${ok ? 'good' : 'bad'}">${message}</span>`;
+}
+
+function getNextFreeSlot(){
+  const used = new Set(samples.map(s => s.slot));
+  for(let i=0; i<100; i++) if(!used.has(i)) return i;
+  return -1;
+}
+
+function fileToDataURL(file){
+  return new Promise((resolve, reject)=>{
+    const r = new FileReader();
+    r.onload = ()=>resolve(r.result);
+    r.onerror = reject;
+    r.readAsDataURL(file);
+  });
+}
+
 function render(){
- const files=Array.from(input.files||[]);
- if(!files.length){
-   status.innerHTML='<span class="bad">파일이 감지되지 않았습니다.</span>';
-   list.innerHTML='';
-   return;
- }
- const total=files.reduce((a,f)=>a+f.size,0);
- status.innerHTML=`<span class="good">성공: ${files.length}개 파일 감지</span><br>총 ${fmt(total)}`;
- list.innerHTML='';
- files.forEach((f,i)=>{
-   const row=document.createElement('div');
-   row.className='row';
-   row.innerHTML=`<b>${String(i).padStart(2,'0')}</b><div class="name">${f.name}</div><div class="size">${fmt(f.size)}</div>`;
-   list.appendChild(row);
- });
+  list.innerHTML = '';
+
+  if(!samples.length){
+    list.innerHTML = '<div class="empty">아직 샘플이 없습니다.</div>';
+    setStatus('샘플을 추가해 주세요.', true);
+    return;
+  }
+
+  samples.sort((a,b)=>a.slot-b.slot);
+
+  const total = samples.reduce((a,s)=>a+s.size,0);
+  const selected = samples.filter(s=>s.selected).length;
+  setStatus(`샘플 ${samples.length}개 · 선택 ${selected}개 · 총 ${fmt(total)}`, true);
+
+  for(const s of samples){
+    const row = document.createElement('div');
+    row.className = 'row' + (s.selected ? ' selected' : '');
+
+    const cb = document.createElement('input');
+    cb.type = 'checkbox';
+    cb.checked = !!s.selected;
+    cb.addEventListener('change', ()=>{
+      s.selected = cb.checked;
+      render();
+    });
+
+    const slot = document.createElement('div');
+    slot.className = 'slot';
+    slot.textContent = String(s.slot).padStart(2,'0');
+
+    const name = document.createElement('div');
+    name.className = 'name';
+    name.textContent = s.name;
+
+    const size = document.createElement('div');
+    size.className = 'size';
+    size.textContent = fmt(s.size);
+
+    row.append(cb, slot, name, size);
+    list.appendChild(row);
+  }
 }
-input.addEventListener('change',render);
-input.addEventListener('input',render);
+
+input.addEventListener('change', async ()=>{
+  const files = Array.from(input.files || []);
+  if(!files.length) return;
+
+  let added = 0;
+
+  for(const f of files){
+    const slot = getNextFreeSlot();
+    if(slot < 0){
+      setStatus('슬롯 00–99가 모두 사용 중입니다.', false);
+      break;
+    }
+
+    try{
+      const dataUrl = await fileToDataURL(f);
+      samples.push({
+        slot,
+        name:f.name,
+        type:f.type || 'audio/wav',
+        size:f.size,
+        dataUrl,
+        selected:true
+      });
+      added++;
+    }catch(e){
+      console.error(e);
+    }
+  }
+
+  input.value = '';
+  render();
+
+  if(added) setStatus(`${added}개 WAV를 추가했습니다.`, true);
+});
+
+selectAllBtn.addEventListener('click', ()=>{
+  samples.forEach(s=>s.selected=true);
+  render();
+});
+
+selectNoneBtn.addEventListener('click', ()=>{
+  samples.forEach(s=>s.selected=false);
+  render();
+});
+
+removeSelectedBtn.addEventListener('click', ()=>{
+  samples = samples.filter(s=>!s.selected);
+  render();
+});
+
+clearBtn.addEventListener('click', ()=>{
+  if(!samples.length) return;
+  if(confirm('현재 샘플 목록을 모두 지울까요?')){
+    samples = [];
+    render();
+  }
+});
+
+saveBtn.addEventListener('click', ()=>{
+  if(!samples.length){
+    setStatus('저장할 샘플이 없습니다.', false);
+    return;
+  }
+
+  const project = {
+    format:'volca-sample-project',
+    version:1,
+    name:projectNameInput.value.trim() || 'My Volca Project',
+    createdAt:new Date().toISOString(),
+    samples:samples.map(({slot,name,type,size,dataUrl})=>({
+      slot,name,type,size,dataUrl
+    }))
+  };
+
+  const blob = new Blob([JSON.stringify(project)], {type:'application/json'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  const safeName = project.name.replace(/[\\/:*?"<>|]+/g,'_').trim() || 'volca-project';
+  a.href = url;
+  a.download = safeName + '.volcaproject';
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+
+  setStatus(`프로젝트를 저장했습니다: ${safeName}.volcaproject`, true);
+});
+
+loadProjectInput.addEventListener('change', async ()=>{
+  const file = loadProjectInput.files && loadProjectInput.files[0];
+  if(!file) return;
+
+  try{
+    const text = await file.text();
+    const project = JSON.parse(text);
+
+    if(project.format !== 'volca-sample-project' || !Array.isArray(project.samples)){
+      throw new Error('지원하지 않는 프로젝트 파일입니다.');
+    }
+
+    const normalized = [];
+    const seen = new Set();
+
+    for(const s of project.samples){
+      const slot = Number(s.slot);
+      if(!Number.isInteger(slot) || slot < 0 || slot > 99 || seen.has(slot)) continue;
+      if(typeof s.dataUrl !== 'string' || !s.dataUrl.startsWith('data:')) continue;
+      seen.add(slot);
+
+      normalized.push({
+        slot,
+        name:String(s.name || `sample_${String(slot).padStart(2,'0')}.wav`),
+        type:String(s.type || 'audio/wav'),
+        size:Number(s.size || 0),
+        dataUrl:s.dataUrl,
+        selected:true
+      });
+    }
+
+    samples = normalized;
+    projectNameInput.value = project.name || 'My Volca Project';
+    render();
+    setStatus(`프로젝트를 불러왔습니다: ${samples.length}개 샘플`, true);
+
+  }catch(e){
+    console.error(e);
+    setStatus('프로젝트 파일을 읽을 수 없습니다: ' + e.message, false);
+  }finally{
+    loadProjectInput.value = '';
+  }
+});
+
+transferBtn.addEventListener('click', ()=>{
+  const chosen = samples.filter(s=>s.selected);
+  if(!chosen.length){
+    setStatus('전송할 샘플을 선택해 주세요.', false);
+    return;
+  }
+
+  setStatus(
+    `현재 ${chosen.length}개 샘플이 선택되었습니다. 기존 SYRO/Volca 전송 함수를 이 버튼에 연결하면 됩니다.`,
+    true
+  );
+});
+
+render();
 </script>
 </body>
 </html>
